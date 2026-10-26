@@ -8,7 +8,6 @@ from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
-from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -26,8 +25,6 @@ N8N_ALLOWED_WORKFLOWS = {
     item.strip() for item in os.getenv("N8N_ALLOWED_WORKFLOWS", "").split(",") if item.strip()
 }
 HERMES_HEALTH_URL = os.getenv("HERMES_HEALTH_URL", "").strip()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
-TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 TELEGRAM_ALLOWED_CHAT_IDS = {
     item.strip() for item in os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",") if item.strip()
 }
@@ -273,113 +270,110 @@ async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any]
     return result if isinstance(result, dict) else {"result": result}
 
 
-async def telegram_send(chat_id: str | int, text: str) -> None:
-    if not TELEGRAM_TOKEN:
-        logger.error("Telegram token not configured; cannot send message")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
-        for offset in range(0, len(text) or 1, 3900):
-            chunk = text[offset:offset + 3900]
-            response = await client.post(url, json={"chat_id": chat_id, "text": chunk})
-            response.raise_for_status()
-
-
 def _cockpit_help() -> str:
     return (
         "🚀 ANDARIS · COCKPIT\n\n"
-        "/cockpit ou /status — estado dos serviços\n"
-        "/providers — provedores de IA configurados\n"
-        "/workflows — workflows autorizados no n8n\n"
-        "/runs — execuções recentes do n8n\n"
-        "/run ID [JSON] — executar workflow autorizado\n"
-        "Qualquer outra mensagem conversa com a IA.\n\n"
-        "Só chats explicitamente autorizados podem operar o cockpit."
+        "/cockpit status — estado dos serviços\n"
+        "/cockpit providers — provedores de IA\n"
+        "/cockpit workflows — workflows autorizados\n"
+        "/cockpit runs — execuções recentes\n"
+        "/cockpit run ID [JSON] — executar workflow autorizado\n"
+        "/cockpit ask pergunta — conversar com a IA\n\n"
+        "Comandos de execução só aceitam workflows previamente autorizados."
     )
 
 
-async def _handle_telegram_message(message: dict[str, Any]) -> None:
-    chat = message.get("chat") or {}
-    chat_id = str(chat.get("id", ""))
-    if not chat_id or chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
-        logger.warning("Ignored Telegram message from non-allowlisted chat")
-        return
-    text = str(message.get("text") or "").strip()
-    if not text:
-        return
-    command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
+async def process_cockpit_command(chat_id: str, text: str) -> str:
+    """Processa somente comandos /cockpit enviados por um chat explicitamente autorizado."""
+    if str(chat_id) not in TELEGRAM_ALLOWED_CHAT_IDS:
+        raise PermissionError("Chat não autorizado para o cockpit.")
+    if len(text) > 12000:
+        raise ValueError("Comando muito longo.")
+    if not text.strip().lower().startswith("/cockpit"):
+        raise ValueError("Use o comando /cockpit.")
+    rest = text.strip()[len("/cockpit"):].strip()
+    if not rest:
+        rest = "status"
+    subcommand, _, args = rest.partition(" ")
+    subcommand = subcommand.lower()
 
+    if subcommand in {"help", "ajuda"}:
+        return _cockpit_help()
+    if subcommand in {"status", "cockpit"}:
+        status = await system_status()
+        lines = ["🚀 ANDARIS · COCKPIT", ""]
+        for key, value in status.items():
+            lines.append(f"{key}: {', '.join(value) if isinstance(value, list) else value}")
+        return "\n".join(lines)
+    if subcommand in {"providers", "provedores"}:
+        providers = configured_providers()
+        return f"IA preferencial: {AI_PROVIDER}\nDisponíveis: {', '.join(providers) if providers else 'nenhum configurado'}"
+    if subcommand in {"workflows", "fluxos"}:
+        data = await n8n_list_allowed_workflows()
+        workflows = data.get("workflows", [])
+        body = "\n".join(
+            f"• {w.get('name') or 'Workflow'} — ID {w.get('id')} — {'ativo' if w.get('active') else 'inativo'}"
+            for w in workflows
+        )
+        return "Workflows autorizados:\n" + (body or "Nenhum workflow disponível.")
+    if subcommand in {"runs", "execucoes", "execuções"}:
+        data = await n8n_recent_executions(5)
+        executions = data.get("executions", [])
+        body = "\n".join(
+            f"• #{item.get('id')} · workflow {item.get('workflowId')} · {item.get('status') or 'status desconhecido'}"
+            for item in executions
+        )
+        return "Execuções recentes:\n" + (body or "Nenhuma execução recente encontrada.")
+    if subcommand in {"run", "executar"}:
+        workflow_id, separator, payload_text = args.strip().partition(" ")
+        if not workflow_id:
+            return "Uso: /cockpit run ID_DO_WORKFLOW [JSON opcional]"
+        payload: dict[str, Any] = {}
+        if separator and payload_text.strip():
+            parsed = json.loads(payload_text)
+            if not isinstance(parsed, dict):
+                raise ValueError("O payload JSON precisa ser um objeto.")
+            payload = parsed
+        result = await n8n_trigger_allowed_workflow(workflow_id, payload)
+        return "✅ Solicitação enviada ao n8n.\n" + json.dumps(result, ensure_ascii=False)[:2500]
+    if subcommand in {"ask", "perguntar"}:
+        if not args.strip():
+            return "Uso: /cockpit ask sua pergunta"
+        result = await chat_with_provider(args.strip())
+        return f"[{result['provider']} · {result['model']}]\n\n{result['text']}"
+    return _cockpit_help()
+
+
+@mcp.custom_route("/api/cockpit/command", methods=["POST"], include_in_schema=False)
+async def cockpit_command(request: Request) -> Response:
+    """API interna para o bot Andaria existente; não registra um segundo webhook do Telegram."""
     try:
-        if command in {"/start", "/help"}:
-            await telegram_send(chat_id, _cockpit_help())
-        elif command in {"/cockpit", "/status"}:
-            status = await system_status()
-            lines = ["🚀 ANDARIS · COCKPIT", ""]
-            for key, value in status.items():
-                lines.append(f"{key}: {', '.join(value) if isinstance(value, list) else value}")
-            await telegram_send(chat_id, "\n".join(lines))
-        elif command == "/providers":
-            providers = configured_providers()
-            await telegram_send(chat_id, f"IA preferencial: {AI_PROVIDER}\nDisponíveis: {', '.join(providers) if providers else 'nenhum configurado'}")
-        elif command == "/workflows":
-            data = await n8n_list_allowed_workflows()
-            workflows = data.get("workflows", [])
-            body = "\n".join(f"• {w.get('name') or 'Workflow'} — ID {w.get('id')} — {'ativo' if w.get('active') else 'inativo'}" for w in workflows)
-            await telegram_send(chat_id, "Workflows autorizados:\n" + (body or "Nenhum workflow disponível."))
-        elif command == "/runs":
-            data = await n8n_recent_executions(5)
-            executions = data.get("executions", [])
-            body = "\n".join(
-                f"• #{item.get('id')} · workflow {item.get('workflowId')} · {item.get('status') or 'status desconhecido'}"
-                for item in executions
-            )
-            await telegram_send(chat_id, "Execuções recentes:\n" + (body or "Nenhuma execução recente encontrada."))
-        elif command == "/run":
-            parts = text.split(maxsplit=2)
-            if len(parts) < 2:
-                await telegram_send(chat_id, "Uso: /run ID_DO_WORKFLOW [JSON opcional]")
-                return
-            workflow_id = parts[1].strip()
-            payload: dict[str, Any] = {}
-            if len(parts) == 3:
-                parsed = json.loads(parts[2])
-                if not isinstance(parsed, dict):
-                    raise ValueError("O payload JSON precisa ser um objeto.")
-                payload = parsed
-            result = await n8n_trigger_allowed_workflow(workflow_id, payload)
-            await telegram_send(chat_id, "✅ Solicitação enviada ao n8n.\n" + json.dumps(result, ensure_ascii=False)[:2500])
-        else:
-            result = await chat_with_provider(text)
-            await telegram_send(chat_id, f"[{result['provider']} · {result['model']}]\n\n{result['text']}")
-    except Exception as exc:
-        logger.exception("Telegram cockpit operation failed (%s)", type(exc).__name__)
-        safe_message = str(exc) if isinstance(exc, (ValueError, json.JSONDecodeError)) else "A operação falhou. Confira a configuração e os logs do serviço."
-        await telegram_send(chat_id, f"⚠️ {safe_message[:1000]}")
-
-
-@mcp.custom_route("/telegram/webhook", methods=["POST"], include_in_schema=False)
-async def telegram_webhook(request: Request) -> Response:
-    if not TELEGRAM_TOKEN or len(TELEGRAM_WEBHOOK_SECRET) < 32:
-        return JSONResponse({"error": "telegram_not_configured"}, status_code=503)
-    supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not hmac.compare_digest(supplied, TELEGRAM_WEBHOOK_SECRET):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    try:
-        update = await request.json()
+        data = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid_json"}, status_code=400)
-    if not isinstance(update, dict):
-        return JSONResponse({"error": "invalid_update"}, status_code=400)
-    message = update.get("message")
-    if not isinstance(message, dict):
-        return JSONResponse({"ok": True})
-    # Acknowledge Telegram immediately; do the potentially slow provider call after the response.
-    return JSONResponse({"ok": True}, background=BackgroundTask(_handle_telegram_message, message))
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    chat_id = str(data.get("chat_id", "")).strip()
+    text = str(data.get("text", "")).strip()
+    if not chat_id or not text:
+        return JSONResponse({"error": "chat_id_and_text_required"}, status_code=400)
+    if chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
+        return JSONResponse({"error": "chat_not_allowed"}, status_code=403)
+    try:
+        reply = await process_cockpit_command(chat_id, text)
+        return JSONResponse({"reply": reply[:3900]})
+    except PermissionError:
+        return JSONResponse({"error": "chat_not_allowed"}, status_code=403)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JSONResponse({"error": str(exc)[:1000]}, status_code=400)
+    except Exception as exc:
+        logger.exception("Cockpit command failed (%s)", type(exc).__name__)
+        return JSONResponse({"error": "cockpit_operation_failed"}, status_code=502)
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health" or request.url.path == "/telegram/webhook":
+        if request.url.path == "/health":
             return await call_next(request)
         if len(API_TOKEN) < 32:
             return JSONResponse({"error": "server_auth_not_configured"}, status_code=503)
