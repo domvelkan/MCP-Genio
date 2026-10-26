@@ -372,8 +372,11 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
             if not isinstance(parsed, dict):
                 raise ValueError("O payload JSON precisa ser um objeto.")
             payload = parsed
-        result = await n8n_trigger_allowed_workflow(workflow_id, payload, actor_id="mcp-genio", human_approval=True, initiated_by=chat_id)
-        return "✅ Solicitação enviada ao n8n.\n" + json.dumps(result, ensure_ascii=False)[:2500]
+        try:
+            result = await n8n_trigger_allowed_workflow(workflow_id, payload, actor_id="mcp-genio", human_approval=True, initiated_by=chat_id)
+        except PermissionError as exc:
+            return "⛔ O Kernel bloqueou a execução. Confira se a ação está registrada e autorizada nas políticas do Kernel.\\n" + str(exc)[:900]
+        return "✅ Solicitação enviada ao n8n.\\n" + json.dumps(result, ensure_ascii=False)[:2500]
     if subcommand in {"ask", "perguntar"}:
         if not args.strip():
             return "Uso: /cockpit ask sua pergunta"
