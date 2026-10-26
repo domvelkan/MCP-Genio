@@ -458,7 +458,7 @@ async def cockpit_command(request: Request) -> Response:
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in {"/health", "/api/cockpit/command"}:
+        if request.url.path in {"/health", "/api/cockpit/health", "/api/cockpit/command"}:
             return await call_next(request)
         if len(API_TOKEN) < 32:
             return JSONResponse({"error": "server_auth_not_configured"}, status_code=503)
@@ -471,6 +471,23 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return await call_next(request)
+
+
+@mcp.custom_route("/api/cockpit/health", methods=["GET"])
+async def cockpit_health(_: Request) -> Response:
+    """Non-secret configuration diagnostics for deployment checks."""
+    return JSONResponse({
+        "service": APP_NAME,
+        "mcp_token_configured": len(API_TOKEN) >= 32,
+        "bridge_token_configured": len(COCKPIT_BRIDGE_TOKEN) >= 32,
+        "kernel_gate_configured": bool(KERNEL_GATEWAY_URL and len(KERNEL_GATEWAY_TOKEN) >= 32),
+        "ai_routes": configured_providers(),
+        "hosted_visual_configured": bool(ANDARIA_VISUAL_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
+        "n8n_configured": bool(N8N_URL and N8N_API_KEY),
+        "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
+        "comfyui_configured": bool(COMFYUI_URL),
+        "hermes_health_configured": bool(HERMES_HEALTH_URL),
+    })
 
 
 @mcp.custom_route("/health", methods=["GET"])
