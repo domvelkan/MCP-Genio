@@ -6,7 +6,7 @@ Camada de coordenação em nuvem do ecossistema Andaris: MCP, cockpit operaciona
 
 - **Andaria**: mantém a integração existente com Telegram e encaminha apenas comandos explícitos `/cockpit ...` do chat administrativo.
 - **MCP-Genio**: serviço de nuvem para ferramentas MCP, cockpit, roteamento OpenRouter/NVIDIA, consulta ao n8n e integração opcional com ComfyUI.
-- **Andaris Kernel**: continua sendo a autoridade arquitetural para contexto, proveniência e autorização. A integração HTTP direta com o Context Engine ainda precisa de um endpoint de serviço; o Genio hoje aplica autenticação e allowlists locais para suas operações.
+- **Andaris Kernel**: autoridade para contexto, proveniência e autorização. O endpoint autenticado `/v1/gate/action` avalia as políticas server-side; o Genio exige `GO` antes de enviar ações ao n8n ou executar workflows no ComfyUI.
 - **andaris-mcp-gateway**: ponte OAuth/MCP existente para recursos no Debian. É opcional e pode ficar indisponível quando o Debian estiver desligado; o cockpit e chamadas de IA hospedadas não dependem dele.
 
 ## Ferramentas MCP
@@ -44,7 +44,7 @@ Configure no serviço **MCP-Genio** no Render:
 - `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`; opcionalmente `NVIDIA_API_KEY` + `NVIDIA_MODEL` para fallback.
 - `N8N_URL`, `N8N_API_KEY`, `N8N_ALLOWED_WORKFLOWS`, `N8N_WEBHOOK_BASE`.
 - `COMFYUI_URL` apenas se a instância for alcançável a partir da nuvem.
-- `HERMES_HEALTH_URL` é somente uma verificação GET; não executa comandos no Hermes.
+- `HERMES_HEALTH_URL` é somente uma verificação GET; não executa comandos no Hermes.\n- `KERNEL_GATEWAY_URL` e `KERNEL_GATEWAY_TOKEN` são obrigatórios para operações com efeitos colaterais; sem eles, a execução falha fechada.\n- O Kernel precisa ter `KERNEL_ACTION_POLICIES` configurado para cada ação permitida, por exemplo `n8n.workflow:ID_DO_WORKFLOW` e `comfyui.submit`.
 
 No serviço **Andaria** (arquivo `andaris/render.yaml`), configure:
 
@@ -68,7 +68,7 @@ Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Strea
 - O acesso MCP e a API interna exigem Bearer token; a API de cockpit também valida a allowlist de chat IDs.
 - Mantenha ComfyUI e n8n privados sempre que possível.
 - Submeter workflow JSON ao ComfyUI pode executar operações arbitrárias; use somente workflows revisados e clientes confiáveis.
-- O endpoint do Hermes é apenas monitoramento. As capacidades específicas do Hermes e a integração formal com o Context Engine do Kernel ainda precisam ser ligadas e validadas.
+- O endpoint do Hermes é apenas monitoramento. A ponte de comandos específicos do Hermes continua opcional e depende do Debian/túnel. A integração de execução com o Kernel está implementada no código, mas ainda precisa de deploy, políticas e testes reais.
 - URLs locais como `127.0.0.1` ou `localhost` não são acessíveis pelo Render.
 - Os testes e o deploy devem ser confirmados antes de considerar a solução pronta para produção.
 
