@@ -7,11 +7,11 @@ services:
     envVars:
       - key: GENIO_MCP_TOKEN
         sync: false
-      - key: TELEGRAM_ALLOWED_CHAT_IDS
-        sync: false
       - key: KERNEL_GATEWAY_URL
         value: https://andaris-kernel.onrender.com
       - key: KERNEL_GATEWAY_TOKEN
+        sync: false
+      - key: COCKPIT_BRIDGE_TOKEN
         sync: false
       - key: AI_PROVIDER
         value: openrouter
