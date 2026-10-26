@@ -21,6 +21,7 @@ COMFYUI_URL = os.getenv("COMFYUI_URL", "").rstrip("/")
 N8N_URL = os.getenv("N8N_URL", "").rstrip("/")
 N8N_API_KEY = os.getenv("N8N_API_KEY", "").strip()
 N8N_WEBHOOK_BASE = os.getenv("N8N_WEBHOOK_BASE", "").rstrip("/")
+N8N_WORKFLOW_WEBHOOK_MAP_RAW = os.getenv("N8N_WORKFLOW_WEBHOOK_MAP", "").strip()
 N8N_ALLOWED_WORKFLOWS = {
     item.strip() for item in os.getenv("N8N_ALLOWED_WORKFLOWS", "").split(",") if item.strip()
 }
@@ -263,10 +264,22 @@ async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any]
     base = required("N8N_WEBHOOK_BASE", N8N_WEBHOOK_BASE)
     if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for c in workflow_id):
         raise ValueError("workflow_id inválido")
+    try:
+        webhook_map = json.loads(N8N_WORKFLOW_WEBHOOK_MAP_RAW or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("N8N_WORKFLOW_WEBHOOK_MAP deve ser um objeto JSON válido") from exc
+    if not isinstance(webhook_map, dict):
+        raise RuntimeError("N8N_WORKFLOW_WEBHOOK_MAP deve ser um objeto JSON")
+    webhook_path = webhook_map.get(workflow_id, workflow_id)
+    if (not isinstance(webhook_path, str) or not webhook_path.strip()
+            or webhook_path.startswith("/") or "://" in webhook_path
+            or any(part in {"", ".", ".."} for part in webhook_path.split("/"))
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/." for ch in webhook_path)):
+        raise ValueError("Caminho de webhook inválido na configuração")
     safe_payload = payload or {}
     if len(json.dumps(safe_payload, ensure_ascii=False).encode("utf-8")) > 100_000:
         raise ValueError("payload excede o limite de 100 KB")
-    result = await post_json(f"{base}/{workflow_id}", safe_payload, timeout=60)
+    result = await post_json(f"{base}/{webhook_path}", safe_payload, timeout=60)
     return result if isinstance(result, dict) else {"result": result}
 
 
