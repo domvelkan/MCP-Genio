@@ -28,9 +28,7 @@ N8N_ALLOWED_WORKFLOWS = {
 HERMES_HEALTH_URL = os.getenv("HERMES_HEALTH_URL", "").strip()
 KERNEL_GATEWAY_URL = os.getenv("KERNEL_GATEWAY_URL", "").rstrip("/")
 KERNEL_GATEWAY_TOKEN = os.getenv("KERNEL_GATEWAY_TOKEN", "").strip()
-TELEGRAM_ALLOWED_CHAT_IDS = {
-    item.strip() for item in os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",") if item.strip()
-}
+COCKPIT_BRIDGE_TOKEN = os.getenv("COCKPIT_BRIDGE_TOKEN", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
@@ -80,7 +78,7 @@ async def post_json(
 def n8n_headers() -> dict[str, str]:
     return {"X-N8N-API-KEY": required("N8N_API_KEY", N8N_API_KEY)}
 
-async def authorize_action(action_id: str, actor_id: str, human_approval: bool) -> dict[str, Any]:
+async def authorize_action(action_id: str, actor_id: str, human_approval: bool, initiated_by: str | None = None) -> dict[str, Any]:
     """Fail-closed authorization through the Andaris Kernel service."""
     base = required("KERNEL_GATEWAY_URL", KERNEL_GATEWAY_URL)
     token = required("KERNEL_GATEWAY_TOKEN", KERNEL_GATEWAY_TOKEN)
@@ -90,7 +88,7 @@ async def authorize_action(action_id: str, actor_id: str, human_approval: bool) 
         response = await client.post(
             f"{base}/v1/gate/action",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"action_id": action_id, "actor_id": str(actor_id), "human_approval": human_approval},
+            json={"action_id": action_id, "actor_id": str(actor_id), "human_approval": human_approval, "initiated_by": str(initiated_by or "")},
         )
     if response.is_error:
         try:
@@ -190,9 +188,8 @@ async def system_status() -> dict[str, Any]:
         "service": APP_NAME,
         "ai_providers_configured": configured_providers(),
         "preferred_ai_provider": AI_PROVIDER,
-        "telegram_cockpit_enabled": bool(TELEGRAM_ALLOWED_CHAT_IDS),
-        "telegram_operator_count": len(TELEGRAM_ALLOWED_CHAT_IDS),
-        "comfyui_configured": bool(COMFYUI_URL),
+        "cockpit_bridge_configured": len(COCKPIT_BRIDGE_TOKEN) >= 32,
+                "comfyui_configured": bool(COMFYUI_URL),
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
         "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
         "hermes_health_configured": bool(HERMES_HEALTH_URL),
@@ -236,14 +233,14 @@ async def comfyui_history(prompt_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def comfyui_submit_workflow(workflow: dict[str, Any], client_id: str | None = None, actor_id: str = "mcp-genio", human_approval: bool = False) -> dict[str, Any]:
+async def comfyui_submit_workflow(workflow: dict[str, Any], client_id: str | None = None, actor_id: str = "mcp-genio", human_approval: bool = False, initiated_by: str | None = None) -> dict[str, Any]:
     """Enfileira workflow JSON no ComfyUI; envie somente workflows revisados."""
     base = required("COMFYUI_URL", COMFYUI_URL)
     if not isinstance(workflow, dict) or not workflow:
         raise ValueError("workflow deve ser um objeto JSON não vazio")
     if len(json.dumps(workflow, ensure_ascii=False).encode("utf-8")) > 1_000_000:
         raise ValueError("workflow excede o limite de 1 MB")
-    await authorize_action("comfyui.submit", actor_id, human_approval)
+    await authorize_action("comfyui.submit", actor_id, human_approval, initiated_by)
     payload: dict[str, Any] = {"prompt": workflow}
     if client_id:
         if len(client_id) > 128 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in client_id):
@@ -286,7 +283,7 @@ async def n8n_recent_executions(limit: int = 5) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any] | None = None, actor_id: str = "mcp-genio", human_approval: bool = False) -> dict[str, Any]:
+async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any] | None = None, actor_id: str = "mcp-genio", human_approval: bool = False, initiated_by: str | None = None) -> dict[str, Any]:
     """Chama webhook n8n por identificador permitido; nunca aceita URL do chamador."""
     if workflow_id not in N8N_ALLOWED_WORKFLOWS:
         raise ValueError("workflow_id não está na allowlist")
@@ -305,7 +302,7 @@ async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any]
             or any(part in {"", ".", ".."} for part in webhook_path.split("/"))
             or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/." for ch in webhook_path)):
         raise ValueError("Caminho de webhook inválido na configuração")
-    await authorize_action(f"n8n.workflow:{workflow_id}", actor_id, human_approval)
+    await authorize_action(f"n8n.workflow:{workflow_id}", actor_id, human_approval, initiated_by)
     safe_payload = payload or {}
     if len(json.dumps(safe_payload, ensure_ascii=False).encode("utf-8")) > 100_000:
         raise ValueError("payload excede o limite de 100 KB")
@@ -328,8 +325,6 @@ def _cockpit_help() -> str:
 
 async def process_cockpit_command(chat_id: str, text: str) -> str:
     """Processa somente comandos /cockpit enviados por um chat explicitamente autorizado."""
-    if str(chat_id) not in TELEGRAM_ALLOWED_CHAT_IDS:
-        raise PermissionError("Chat não autorizado para o cockpit.")
     if len(text) > 12000:
         raise ValueError("Comando muito longo.")
     if not text.strip().lower().startswith("/cockpit"):
@@ -377,7 +372,7 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
             if not isinstance(parsed, dict):
                 raise ValueError("O payload JSON precisa ser um objeto.")
             payload = parsed
-        result = await n8n_trigger_allowed_workflow(workflow_id, payload, actor_id=chat_id, human_approval=True)
+        result = await n8n_trigger_allowed_workflow(workflow_id, payload, actor_id="mcp-genio", human_approval=True, initiated_by=chat_id)
         return "✅ Solicitação enviada ao n8n.\n" + json.dumps(result, ensure_ascii=False)[:2500]
     if subcommand in {"ask", "perguntar"}:
         if not args.strip():
@@ -400,8 +395,11 @@ async def cockpit_command(request: Request) -> Response:
     text = str(data.get("text", "")).strip()
     if not chat_id or not text:
         return JSONResponse({"error": "chat_id_and_text_required"}, status_code=400)
-    if chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
-        return JSONResponse({"error": "chat_not_allowed"}, status_code=403)
+    if len(COCKPIT_BRIDGE_TOKEN) < 32:
+        return JSONResponse({"error": "cockpit_bridge_not_configured"}, status_code=503)
+    supplied = request.headers.get("X-Cockpit-Bridge-Token", "")
+    if not hmac.compare_digest(supplied, COCKPIT_BRIDGE_TOKEN):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         reply = await process_cockpit_command(chat_id, text)
         return JSONResponse({"reply": reply[:3900]})
@@ -416,7 +414,7 @@ async def cockpit_command(request: Request) -> Response:
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
+        if request.url.path in {"/health", "/api/cockpit/command"}:
             return await call_next(request)
         if len(API_TOKEN) < 32:
             return JSONResponse({"error": "server_auth_not_configured"}, status_code=503)
