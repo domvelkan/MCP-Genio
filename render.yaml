@@ -9,6 +9,10 @@ services:
         sync: false
       - key: TELEGRAM_ALLOWED_CHAT_IDS
         sync: false
+      - key: KERNEL_GATEWAY_URL
+        sync: false
+      - key: KERNEL_GATEWAY_TOKEN
+        sync: false
       - key: AI_PROVIDER
         value: openrouter
       - key: OPENROUTER_API_KEY
