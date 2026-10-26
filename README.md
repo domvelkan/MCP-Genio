@@ -74,4 +74,4 @@ Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Strea
 
 ## Deploy
 
-Use `render.yaml` como ponto de partida. Configure os segredos manualmente no Render; nenhum token real é armazenado no repositório. O Blueprint usa plano Starter, cujo custo e região devem ser confirmados antes da implantação.
+Use `render.yaml` como ponto de partida. Configure os segredos manualmente no Render; nenhum token real é armazenado no repositório. O Blueprint está no plano Free para validar o fluxo sem criar cobrança. Esse plano pode suspender o serviço após inatividade; para um cockpit realmente sempre disponível, será necessário aprovar a mudança para Starter no Render.
