@@ -44,7 +44,9 @@ Configure no serviço **MCP-Genio** no Render:
 - `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`; opcionalmente `NVIDIA_API_KEY` + `NVIDIA_MODEL` para fallback.
 - `N8N_URL`, `N8N_API_KEY`, `N8N_ALLOWED_WORKFLOWS`, `N8N_WEBHOOK_BASE`.
 - `COMFYUI_URL` apenas se a instância for alcançável a partir da nuvem.
-- `HERMES_HEALTH_URL` é somente uma verificação GET; não executa comandos no Hermes.\n- `KERNEL_GATEWAY_URL` e `KERNEL_GATEWAY_TOKEN` são obrigatórios para operações com efeitos colaterais; sem eles, a execução falha fechada.\n- O Kernel precisa ter `KERNEL_ACTION_POLICIES` configurado para cada ação permitida, por exemplo `n8n.workflow:ID_DO_WORKFLOW` e `comfyui.submit`.
+- `HERMES_HEALTH_URL` é somente uma verificação GET; não executa comandos no Hermes.
+- `KERNEL_GATEWAY_URL` e `KERNEL_GATEWAY_TOKEN` são obrigatórios para operações com efeitos colaterais; sem eles, a execução falha fechada.
+- O Kernel precisa ter `KERNEL_ACTION_POLICIES` configurado para cada ação permitida, por exemplo `n8n.workflow:ID_DO_WORKFLOW` e `comfyui.submit`.
 
 No serviço **Andaria** (arquivo `andaris/render.yaml`), configure:
 
