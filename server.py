@@ -163,7 +163,7 @@ async def system_status() -> dict[str, Any]:
         "service": APP_NAME,
         "ai_providers_configured": configured_providers(),
         "preferred_ai_provider": AI_PROVIDER,
-        "telegram_configured": bool(TELEGRAM_TOKEN and TELEGRAM_WEBHOOK_SECRET),
+        "telegram_cockpit_enabled": bool(TELEGRAM_ALLOWED_CHAT_IDS),
         "telegram_operator_count": len(TELEGRAM_ALLOWED_CHAT_IDS),
         "comfyui_configured": bool(COMFYUI_URL),
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
