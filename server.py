@@ -26,6 +26,8 @@ N8N_ALLOWED_WORKFLOWS = {
     item.strip() for item in os.getenv("N8N_ALLOWED_WORKFLOWS", "").split(",") if item.strip()
 }
 HERMES_HEALTH_URL = os.getenv("HERMES_HEALTH_URL", "").strip()
+KERNEL_GATEWAY_URL = os.getenv("KERNEL_GATEWAY_URL", "").rstrip("/")
+KERNEL_GATEWAY_TOKEN = os.getenv("KERNEL_GATEWAY_TOKEN", "").strip()
 TELEGRAM_ALLOWED_CHAT_IDS = {
     item.strip() for item in os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",") if item.strip()
 }
@@ -77,6 +79,30 @@ async def post_json(
 
 def n8n_headers() -> dict[str, str]:
     return {"X-N8N-API-KEY": required("N8N_API_KEY", N8N_API_KEY)}
+
+async def authorize_action(action_id: str, actor_id: str, human_approval: bool) -> dict[str, Any]:
+    """Fail-closed authorization through the Andaris Kernel service."""
+    base = required("KERNEL_GATEWAY_URL", KERNEL_GATEWAY_URL)
+    token = required("KERNEL_GATEWAY_TOKEN", KERNEL_GATEWAY_TOKEN)
+    if len(token) < 32:
+        raise RuntimeError("kernel_gateway_token_invalid; side-effecting action blocked")
+    async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+        response = await client.post(
+            f"{base}/v1/gate/action",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"action_id": action_id, "actor_id": str(actor_id), "human_approval": human_approval},
+        )
+    if response.is_error:
+        try:
+            body = response.json()
+            detail = body.get("detail", body)
+        except ValueError:
+            detail = "kernel_gate_unavailable"
+        raise PermissionError("kernel_gate_blocked: " + json.dumps(detail, ensure_ascii=False)[:1000])
+    data = response.json()
+    if data.get("gate") != "GO":
+        raise PermissionError("kernel_gate_blocked")
+    return data
 
 
 def configured_providers() -> list[str]:
@@ -170,11 +196,13 @@ async def system_status() -> dict[str, Any]:
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
         "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
         "hermes_health_configured": bool(HERMES_HEALTH_URL),
+        "kernel_gate_configured": bool(KERNEL_GATEWAY_URL and len(KERNEL_GATEWAY_TOKEN) >= 32),
     }
     targets = {
         "comfyui": (f"{COMFYUI_URL}/system_stats" if COMFYUI_URL else "", None),
         "n8n": (f"{N8N_URL}/healthz" if N8N_URL else "", n8n_headers() if N8N_URL and N8N_API_KEY else None),
         "hermes": (HERMES_HEALTH_URL, None),
+        "kernel": (f"{KERNEL_GATEWAY_URL}/health" if KERNEL_GATEWAY_URL else "", None),
     }
     for name, (url, headers) in targets.items():
         if not url:
@@ -208,13 +236,14 @@ async def comfyui_history(prompt_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def comfyui_submit_workflow(workflow: dict[str, Any], client_id: str | None = None) -> dict[str, Any]:
+async def comfyui_submit_workflow(workflow: dict[str, Any], client_id: str | None = None, actor_id: str = "mcp-genio", human_approval: bool = False) -> dict[str, Any]:
     """Enfileira workflow JSON no ComfyUI; envie somente workflows revisados."""
     base = required("COMFYUI_URL", COMFYUI_URL)
     if not isinstance(workflow, dict) or not workflow:
         raise ValueError("workflow deve ser um objeto JSON não vazio")
     if len(json.dumps(workflow, ensure_ascii=False).encode("utf-8")) > 1_000_000:
         raise ValueError("workflow excede o limite de 1 MB")
+    await authorize_action("comfyui.submit", actor_id, human_approval)
     payload: dict[str, Any] = {"prompt": workflow}
     if client_id:
         if len(client_id) > 128 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in client_id):
@@ -257,7 +286,7 @@ async def n8n_recent_executions(limit: int = 5) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any] | None = None, actor_id: str = "mcp-genio", human_approval: bool = False) -> dict[str, Any]:
     """Chama webhook n8n por identificador permitido; nunca aceita URL do chamador."""
     if workflow_id not in N8N_ALLOWED_WORKFLOWS:
         raise ValueError("workflow_id não está na allowlist")
@@ -276,6 +305,7 @@ async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any]
             or any(part in {"", ".", ".."} for part in webhook_path.split("/"))
             or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/." for ch in webhook_path)):
         raise ValueError("Caminho de webhook inválido na configuração")
+    await authorize_action(f"n8n.workflow:{workflow_id}", actor_id, human_approval)
     safe_payload = payload or {}
     if len(json.dumps(safe_payload, ensure_ascii=False).encode("utf-8")) > 100_000:
         raise ValueError("payload excede o limite de 100 KB")
@@ -347,7 +377,7 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
             if not isinstance(parsed, dict):
                 raise ValueError("O payload JSON precisa ser um objeto.")
             payload = parsed
-        result = await n8n_trigger_allowed_workflow(workflow_id, payload)
+        result = await n8n_trigger_allowed_workflow(workflow_id, payload, actor_id=chat_id, human_approval=True)
         return "✅ Solicitação enviada ao n8n.\n" + json.dumps(result, ensure_ascii=False)[:2500]
     if subcommand in {"ask", "perguntar"}:
         if not args.strip():
