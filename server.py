@@ -215,6 +215,7 @@ async def system_status() -> dict[str, Any]:
         "n8n": (f"{N8N_URL}/healthz" if N8N_URL else "", n8n_headers() if N8N_URL and N8N_API_KEY else None),
         "hermes": (HERMES_HEALTH_URL, None),
         "kernel": (f"{KERNEL_GATEWAY_URL}/health" if KERNEL_GATEWAY_URL else "", None),
+        "andaria_ai": (f"{ANDARIA_AI_URL}/health" if ANDARIA_AI_URL else "", None),
     }
     for name, (url, headers) in targets.items():
         if not url:
