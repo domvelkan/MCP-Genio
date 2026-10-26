@@ -1,39 +1,77 @@
 # MCP-Genio
 
-Servidor MCP independente para integração controlada entre clientes MCP, ComfyUI, n8n e verificação opcional de saúde do Hermes.
+Camada de coordenação em nuvem do ecossistema Andaris: MCP, cockpit operacional, provedores de IA e execução controlada de workflows. O bot Telegram existente continua recebendo updates pelo serviço Andaria; o Genio **não registra um segundo webhook para o mesmo bot**.
 
-## Recursos
-- MCP Streamable HTTP em `/mcp`.
-- Token Bearer obrigatório para todas as rotas exceto `/health`.
-- ComfyUI: estado da fila, histórico por prompt ID e envio de workflow JSON.
-- n8n: listagem filtrada por allowlist e disparo de webhooks autorizados.
-- Docker, Render Blueprint e CI no GitHub Actions.
+## Papel de cada componente
+
+- **Andaria**: mantém a integração existente com Telegram e encaminha apenas comandos explícitos `/cockpit ...` do chat administrativo.
+- **MCP-Genio**: serviço de nuvem para ferramentas MCP, cockpit, roteamento OpenRouter/NVIDIA, consulta ao n8n e integração opcional com ComfyUI.
+- **Andaris Kernel**: continua sendo a autoridade arquitetural para contexto, proveniência e autorização. A integração HTTP direta com o Context Engine ainda precisa de um endpoint de serviço; o Genio hoje aplica autenticação e allowlists locais para suas operações.
+- **andaris-mcp-gateway**: ponte OAuth/MCP existente para recursos no Debian. É opcional e pode ficar indisponível quando o Debian estiver desligado; o cockpit e chamadas de IA hospedadas não dependem dele.
+
+## Ferramentas MCP
+
+- `ai_chat(prompt)`: OpenRouter com fallback para NVIDIA, ou a ordem configurada em `AI_PROVIDER`.
+- `system_status()`: estado/configuração dos provedores, ComfyUI, n8n e endpoint opcional do Hermes.
+- `comfyui_queue_status()`, `comfyui_history(prompt_id)`, `comfyui_submit_workflow(workflow, client_id?)`.
+- `n8n_list_allowed_workflows()`, `n8n_recent_executions(limit)`, `n8n_trigger_allowed_workflow(workflow_id, payload?)`.
+
+## Comandos do Telegram
+
+No bot Andaris já existente:
+
+- `/cockpit` ou `/cockpit status` — estado operacional.
+- `/cockpit providers` — provedores de IA configurados.
+- `/cockpit workflows` — workflows autorizados.
+- `/cockpit runs` — execuções recentes.
+- `/cockpit run ID_DO_WORKFLOW {"chave":"valor"}` — chama o webhook associado ao ID permitido.
+- `/cockpit ask sua pergunta` — conversa usando o provedor de IA hospedado.
+
+O Genio não aceita comandos arbitrários do Debian. O comando `/cockpit run` só aceita IDs incluídos em `N8N_ALLOWED_WORKFLOWS`; use essa allowlist apenas para workflows revisados. A chamada pode produzir efeitos externos conforme a lógica do workflow.
 
 ## Configuração
-Configure as variáveis de ambiente documentadas em `.env.example`. Gere o token com:
+
+Gere um token aleatório com:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Instale e execute:
+Configure no serviço **MCP-Genio** no Render:
+
+- `GENIO_MCP_TOKEN`: token de pelo menos 32 caracteres.
+- `TELEGRAM_ALLOWED_CHAT_IDS`: IDs dos chats autorizados, separados por vírgula. Use o ID administrativo já configurado no Andaria.
+- `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`; opcionalmente `NVIDIA_API_KEY` + `NVIDIA_MODEL` para fallback.
+- `N8N_URL`, `N8N_API_KEY`, `N8N_ALLOWED_WORKFLOWS`, `N8N_WEBHOOK_BASE`.
+- `COMFYUI_URL` apenas se a instância for alcançável a partir da nuvem.
+- `HERMES_HEALTH_URL` é somente uma verificação GET; não executa comandos no Hermes.
+
+No serviço **Andaria** (arquivo `andaris/render.yaml`), configure:
+
+- `MCP_GENIO_URL`: URL pública do serviço MCP-Genio, sem barra final.
+- `MCP_GENIO_TOKEN`: o mesmo valor configurado como `GENIO_MCP_TOKEN` no Genio.
+
+O comando do Telegram é encaminhado pelo webhook que já existe no Andaria. **Não aponte o webhook do mesmo bot para o Genio**, pois isso interromperia o webhook atual.
+
+## Execução local
 
 ```bash
 pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 10000
 ```
 
-Endpoints: `/health` e MCP em `/mcp`.
+Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Streamable HTTP em `/mcp`.
 
-## Segurança
-- Não comite segredos ou arquivos `.env`.
-- Mantenha ComfyUI e n8n privados quando possível.
-- Preencha `N8N_ALLOWED_WORKFLOWS` somente com identificadores autorizados.
-- `N8N_WEBHOOK_BASE` deve apontar para a instância confiável de n8n; proteja webhooks também no próprio n8n.
-- O envio de workflows ao ComfyUI executa o conteúdo enviado; use workflows revisados e restrinja o acesso ao MCP.
-- `HERMES_HEALTH_URL` é somente uma verificação GET; este projeto não executa comandos arbitrários no Debian.
+## Segurança e limites atuais
+
+- Não comite segredos nem arquivos `.env`.
+- O acesso MCP e a API interna exigem Bearer token; a API de cockpit também valida a allowlist de chat IDs.
+- Mantenha ComfyUI e n8n privados sempre que possível.
+- Submeter workflow JSON ao ComfyUI pode executar operações arbitrárias; use somente workflows revisados e clientes confiáveis.
+- O endpoint do Hermes é apenas monitoramento. As capacidades específicas do Hermes e a integração formal com o Context Engine do Kernel ainda precisam ser ligadas e validadas.
+- URLs locais como `127.0.0.1` ou `localhost` não são acessíveis pelo Render.
+- Os testes e o deploy devem ser confirmados antes de considerar a solução pronta para produção.
 
 ## Deploy
-Use `render.yaml` como ponto de partida. Configure segredos no painel do Render antes de disponibilizar o serviço. O Blueprint usa plano Starter como base de serviço persistente; confirme custo e região antes do deploy.
 
-Este projeto precisa ser validado contra suas instâncias reais antes de ser considerado pronto para produção.
+Use `render.yaml` como ponto de partida. Configure os segredos manualmente no Render; nenhum token real é armazenado no repositório. O Blueprint usa plano Starter, cujo custo e região devem ser confirmados antes da implantação.
