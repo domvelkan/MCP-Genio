@@ -35,3 +35,11 @@ def test_cockpit_requires_explicit_command():
 def test_provider_list_never_includes_secrets():
     providers = server.configured_providers()
     assert all(name in {"openrouter", "nvidia"} for name in providers)
+
+def test_side_effecting_action_fails_closed_without_kernel_gateway():
+    try:
+        asyncio.run(server.authorize_action("n8n.workflow:demo", "12345", True))
+    except RuntimeError as exc:
+        assert "KERNEL_GATEWAY_URL" in str(exc) or "KERNEL_GATEWAY_TOKEN" in str(exc)
+    else:
+        raise AssertionError("execution must fail closed when Kernel is not configured")
