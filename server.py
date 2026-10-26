@@ -271,10 +271,10 @@ async def comfyui_submit_workflow(workflow: dict[str, Any], client_id: str | Non
 @mcp.tool()
 async def n8n_list_allowed_workflows() -> dict[str, Any]:
     """Lista apenas workflows cujos IDs estão na allowlist configurada."""
-    base = required("N8N_URL", N8N_URL)
-    _ = required("N8N_API_KEY", N8N_API_KEY)
     if not N8N_ALLOWED_WORKFLOWS:
         return {"workflows": [], "message": "Nenhum workflow permitido; configure N8N_ALLOWED_WORKFLOWS."}
+    base = required("N8N_URL", N8N_URL)
+    _ = required("N8N_API_KEY", N8N_API_KEY)
     data = await get_json(f"{base}/api/v1/workflows?limit=250", headers=n8n_headers())
     rows = data.get("data", []) if isinstance(data, dict) else []
     allowed = [w for w in rows if str(w.get("id", "")) in N8N_ALLOWED_WORKFLOWS]
@@ -284,11 +284,11 @@ async def n8n_list_allowed_workflows() -> dict[str, Any]:
 @mcp.tool()
 async def n8n_recent_executions(limit: int = 5) -> dict[str, Any]:
     """Consulta execuções recentes do n8n, filtradas para workflows permitidos."""
-    base = required("N8N_URL", N8N_URL)
-    _ = required("N8N_API_KEY", N8N_API_KEY)
     limit = max(1, min(int(limit), 20))
     if not N8N_ALLOWED_WORKFLOWS:
         return {"executions": [], "message": "Nenhum workflow autorizado."}
+    base = required("N8N_URL", N8N_URL)
+    _ = required("N8N_API_KEY", N8N_API_KEY)
     data = await get_json(f"{base}/api/v1/executions?limit={limit}", headers=n8n_headers())
     rows = data.get("data", []) if isinstance(data, dict) else []
     allowed = [item for item in rows if str(item.get("workflowId", "")) in N8N_ALLOWED_WORKFLOWS]
