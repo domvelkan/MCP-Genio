@@ -7,6 +7,22 @@ services:
     envVars:
       - key: GENIO_MCP_TOKEN
         sync: false
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: AI_PROVIDER
+        value: openrouter
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: NVIDIA_MODEL
+        sync: false
+      - key: ANDARIA_SITE
+        value: https://andaria.com.br
       - key: COMFYUI_URL
         sync: false
       - key: N8N_URL
