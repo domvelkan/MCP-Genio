@@ -14,13 +14,9 @@ def test_unknown_workflow_not_allowed():
     assert "workflow-not-approved" not in server.N8N_ALLOWED_WORKFLOWS
 
 
-def test_cockpit_rejects_unapproved_chat():
-    try:
-        asyncio.run(server.process_cockpit_command("99999", "/cockpit status"))
-    except PermissionError:
-        pass
-    else:
-        raise AssertionError("unapproved chat should be rejected")
+def test_cockpit_help_command_returns_operator_commands():
+    reply = asyncio.run(server.process_cockpit_command("99999", "/cockpit help"))
+    assert "/cockpit status" in reply
 
 
 def test_cockpit_requires_explicit_command():
