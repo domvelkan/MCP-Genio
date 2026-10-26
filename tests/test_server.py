@@ -39,3 +39,18 @@ def test_side_effecting_action_fails_closed_without_kernel_gateway():
         assert "KERNEL_GATEWAY_URL" in str(exc) or "KERNEL_GATEWAY_TOKEN" in str(exc)
     else:
         raise AssertionError("execution must fail closed when Kernel is not configured")
+
+
+def test_empty_workflow_list_is_safe_without_n8n_config():
+    if server.N8N_ALLOWED_WORKFLOWS:
+        return
+    result = asyncio.run(server.n8n_list_allowed_workflows())
+    assert result["workflows"] == []
+    assert "Nenhum workflow" in result["message"]
+
+
+def test_empty_execution_list_is_safe_without_n8n_config():
+    if server.N8N_ALLOWED_WORKFLOWS:
+        return
+    result = asyncio.run(server.n8n_recent_executions())
+    assert result["executions"] == []
