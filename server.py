@@ -30,6 +30,7 @@ KERNEL_GATEWAY_URL = os.getenv("KERNEL_GATEWAY_URL", "").rstrip("/")
 KERNEL_GATEWAY_TOKEN = os.getenv("KERNEL_GATEWAY_TOKEN", "").strip()
 COCKPIT_BRIDGE_TOKEN = os.getenv("COCKPIT_BRIDGE_TOKEN", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
+ANDARIA_AI_URL = os.getenv("ANDARIA_AI_URL", "https://andaria.onrender.com/api/cockpit/ai").rstrip("/")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
@@ -158,7 +159,19 @@ async def chat_with_provider(prompt: str, system_prompt: str | None = None) -> d
         raise ValueError("A mensagem excede o limite de 20.000 caracteres")
     providers = configured_providers()
     if not providers:
-        raise RuntimeError("Nenhum provedor de IA configurado")
+        if len(COCKPIT_BRIDGE_TOKEN) < 32 or not ANDARIA_AI_URL:
+            raise RuntimeError("Nenhum provedor de IA configurado")
+        async with httpx.AsyncClient(timeout=95, follow_redirects=False) as client:
+            response = await client.post(
+                ANDARIA_AI_URL,
+                headers={"X-Cockpit-Bridge-Token": COCKPIT_BRIDGE_TOKEN, "Content-Type": "application/json"},
+                json={"prompt": prompt, "system_prompt": system_prompt or "Você é o copiloto operacional do Andaris. Seja claro, conciso e nunca afirme que executou uma ação sem evidência."},
+            )
+            response.raise_for_status()
+            data = response.json()
+        if not isinstance(data.get("text"), str) or not data["text"].strip():
+            raise RuntimeError("Andaria AI proxy returned no text")
+        return {"text": data["text"].strip(), "provider": data.get("provider", "openrouter-via-andaria"), "model": data.get("model", "unknown")}
     preferred = [AI_PROVIDER, "nvidia" if AI_PROVIDER == "openrouter" else "openrouter"]
     ordered = [name for name in preferred if name in providers]
     messages = [
