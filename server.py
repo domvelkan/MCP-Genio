@@ -437,7 +437,7 @@ async def health(_: Request) -> Response:
     return JSONResponse({"ok": True, "service": APP_NAME})
 
 
-app = mcp.streamable_http_app(host="0.0.0.0")
+app = mcp.streamable_http_app()
 app.add_middleware(BearerAuthMiddleware)
 
 if __name__ == "__main__":
