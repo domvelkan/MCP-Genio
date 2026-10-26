@@ -110,6 +110,8 @@ def configured_providers() -> list[str]:
         providers.append("openrouter")
     if NVIDIA_API_KEY and NVIDIA_MODEL:
         providers.append("nvidia")
+    if not providers and len(COCKPIT_BRIDGE_TOKEN) >= 32 and ANDARIA_AI_URL:
+        providers.append("openrouter-via-andaria")
     return providers
 
 
@@ -159,8 +161,8 @@ async def chat_with_provider(prompt: str, system_prompt: str | None = None) -> d
         raise ValueError("A mensagem excede o limite de 20.000 caracteres")
     providers = configured_providers()
     if not providers:
-        if len(COCKPIT_BRIDGE_TOKEN) < 32 or not ANDARIA_AI_URL:
-            raise RuntimeError("Nenhum provedor de IA configurado")
+        raise RuntimeError("Nenhum provedor de IA configurado")
+    if providers == ["openrouter-via-andaria"]:
         async with httpx.AsyncClient(timeout=95, follow_redirects=False) as client:
             response = await client.post(
                 ANDARIA_AI_URL,
