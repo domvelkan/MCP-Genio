@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mcp-genio
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: GENIO_MCP_TOKEN
+        sync: false
+      - key: COMFYUI_URL
+        sync: false
+      - key: N8N_URL
+        sync: false
+      - key: N8N_API_KEY
+        sync: false
+      - key: N8N_ALLOWED_WORKFLOWS
+        sync: false
+      - key: N8N_WEBHOOK_BASE
+        sync: false
+      - key: HERMES_HEALTH_URL
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
