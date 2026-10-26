@@ -40,7 +40,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 Configure no serviço **MCP-Genio** no Render:
 
 - `GENIO_MCP_TOKEN`: token de pelo menos 32 caracteres.
-- `TELEGRAM_ALLOWED_CHAT_IDS`: IDs dos chats autorizados, separados por vírgula. Use o ID administrativo já configurado no Andaria.
+- `COCKPIT_BRIDGE_TOKEN`: token aleatório de pelo menos 32 caracteres, compartilhado somente com o serviço Andaria.
 - `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`; opcionalmente `NVIDIA_API_KEY` + `NVIDIA_MODEL` para fallback.
 - `N8N_URL`, `N8N_API_KEY`, `N8N_ALLOWED_WORKFLOWS`, `N8N_WEBHOOK_BASE`.
 - `COMFYUI_URL` apenas se a instância for alcançável a partir da nuvem.
@@ -49,7 +49,7 @@ Configure no serviço **MCP-Genio** no Render:
 No serviço **Andaria** (arquivo `andaris/render.yaml`), configure:
 
 - `MCP_GENIO_URL`: URL pública do serviço MCP-Genio, sem barra final.
-- `MCP_GENIO_TOKEN`: o mesmo valor configurado como `GENIO_MCP_TOKEN` no Genio.
+- `MCP_GENIO_TOKEN`: o mesmo valor configurado como `COCKPIT_BRIDGE_TOKEN` no Genio (não reutilize o token geral do MCP).
 
 O comando do Telegram é encaminhado pelo webhook que já existe no Andaria. **Não aponte o webhook do mesmo bot para o Genio**, pois isso interromperia o webhook atual.
 
@@ -65,7 +65,7 @@ Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Strea
 ## Segurança e limites atuais
 
 - Não comite segredos nem arquivos `.env`.
-- O acesso MCP e a API interna exigem Bearer token; a API de cockpit também valida a allowlist de chat IDs.
+- O acesso MCP exige Bearer token. A API interna de cockpit exige um token de ponte separado; a validação do chat administrativo é feita pelo webhook existente do Andaria antes do encaminhamento.
 - Mantenha ComfyUI e n8n privados sempre que possível.
 - Submeter workflow JSON ao ComfyUI pode executar operações arbitrárias; use somente workflows revisados e clientes confiáveis.
 - O endpoint do Hermes é apenas monitoramento. A ponte de comandos específicos do Hermes continua opcional e depende do Debian/túnel. A integração de execução com o Kernel está implementada no código, mas ainda precisa de deploy, políticas e testes reais.
