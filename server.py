@@ -415,7 +415,9 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
                     error = "visual_generation_failed"
                 return "⛔ Não consegui gerar a imagem: " + str(error)[:300]
             data = response.json()
-        return f"🎨 Imagem enviada ao Telegram via {data.get('provider', 'provedor hospedado')} · modelo {data.get('model', 'não informado')}."
+        cost = data.get("cost_usd")
+        cost_note = f" · custo reportado: US${float(cost):.3f}" if isinstance(cost, (int, float)) else ""
+        return f"🎨 Imagem enviada ao Telegram via {data.get('provider', 'provedor hospedado')} · modelo {data.get('model', 'não informado')}{cost_note}."
     if subcommand in {"ask", "perguntar"}:
         if not args.strip():
             return "Uso: /cockpit ask sua pergunta"
