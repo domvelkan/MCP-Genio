@@ -31,6 +31,7 @@ KERNEL_GATEWAY_TOKEN = os.getenv("KERNEL_GATEWAY_TOKEN", "").strip()
 COCKPIT_BRIDGE_TOKEN = os.getenv("COCKPIT_BRIDGE_TOKEN", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
 ANDARIA_AI_URL = os.getenv("ANDARIA_AI_URL", "https://andaria.onrender.com/api/cockpit/ai").rstrip("/")
+ANDARIA_VISUAL_URL = os.getenv("ANDARIA_VISUAL_URL", "https://andaria.onrender.com/api/cockpit/visual").rstrip("/")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
@@ -216,6 +217,7 @@ async def system_status() -> dict[str, Any]:
         "hermes": (HERMES_HEALTH_URL, None),
         "kernel": (f"{KERNEL_GATEWAY_URL}/health" if KERNEL_GATEWAY_URL else "", None),
         "andaria_ai": (f"{ANDARIA_AI_URL}/health" if ANDARIA_AI_URL else "", None),
+        "hosted_visual": (f"{ANDARIA_VISUAL_URL}/health" if ANDARIA_VISUAL_URL else "", None),
     }
     for name, (url, headers) in targets.items():
         if not url:
@@ -334,7 +336,8 @@ def _cockpit_help() -> str:
         "/cockpit workflows — workflows autorizados\n"
         "/cockpit runs — execuções recentes\n"
         "/cockpit run ID [JSON] — executar workflow autorizado\n"
-        "/cockpit ask pergunta — conversar com a IA\n\n"
+        "/cockpit ask pergunta — conversar com a IA\n"
+        "/cockpit visual descrição — gerar imagem pela API hospedada e enviar aqui\n\n"
         "Comandos de execução só aceitam workflows previamente autorizados."
     )
 
@@ -393,6 +396,26 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
         except PermissionError as exc:
             return "⛔ O Kernel bloqueou a execução. Confira se a ação está registrada e autorizada nas políticas do Kernel.\\n" + str(exc)[:900]
         return "✅ Solicitação enviada ao n8n.\\n" + json.dumps(result, ensure_ascii=False)[:2500]
+    if subcommand in {"visual", "imagem", "image"}:
+        prompt = args.strip()
+        if not prompt:
+            return "Uso: /cockpit visual descreva a imagem que deseja gerar"
+        if len(COCKPIT_BRIDGE_TOKEN) < 32:
+            raise RuntimeError("Ponte segura Andaria-Genio não configurada")
+        async with httpx.AsyncClient(timeout=100, follow_redirects=False) as client:
+            response = await client.post(
+                ANDARIA_VISUAL_URL,
+                headers={"X-Cockpit-Bridge-Token": COCKPIT_BRIDGE_TOKEN, "Content-Type": "application/json"},
+                json={"chat_id": str(chat_id), "prompt": prompt},
+            )
+            if response.is_error:
+                try:
+                    error = response.json().get("error", "visual_generation_failed")
+                except ValueError:
+                    error = "visual_generation_failed"
+                return "⛔ Não consegui gerar a imagem: " + str(error)[:300]
+            data = response.json()
+        return f"🎨 Imagem enviada ao Telegram via {data.get('provider', 'provedor hospedado')} · modelo {data.get('model', 'não informado')}."
     if subcommand in {"ask", "perguntar"}:
         if not args.strip():
             return "Uso: /cockpit ask sua pergunta"
