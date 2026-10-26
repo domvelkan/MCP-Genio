@@ -33,6 +33,8 @@ services:
         sync: false
       - key: N8N_WEBHOOK_BASE
         sync: false
+      - key: N8N_WORKFLOW_WEBHOOK_MAP
+        value: '{}'
       - key: HERMES_HEALTH_URL
         sync: false
       - key: LOG_LEVEL
