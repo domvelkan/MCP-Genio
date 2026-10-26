@@ -6,7 +6,7 @@ Camada de coordenação em nuvem do ecossistema Andaris: MCP, cockpit operaciona
 
 - **Andaria**: mantém a integração existente com Telegram e encaminha apenas comandos explícitos `/cockpit ...` do chat administrativo.
 - **MCP-Genio**: serviço de nuvem para ferramentas MCP, cockpit, roteamento de IA, consulta ao n8n e integração opcional com ComfyUI.
-- **Andaria AI/Visual**: reutiliza a chave OpenRouter e o token Hugging Face já mantidos pelo serviço Andaria; a geração visual pode enviar o resultado diretamente ao Telegram sem hospedar ComfyUI.
+- **Andaria AI/Visual**: reutiliza a chave OpenRouter já mantida pelo serviço Andaria para chat e geração de imagem; a imagem é enviada diretamente ao Telegram sem hospedar ComfyUI nem exigir um segundo provedor.
 - **Andaris Kernel**: autoridade para contexto, proveniência e autorização. O endpoint autenticado `/v1/gate/action` avalia as políticas server-side; o Genio exige `GO` antes de enviar ações ao n8n ou executar workflows no ComfyUI.
 - **andaris-mcp-gateway**: ponte OAuth/MCP existente para recursos no Debian. É opcional e pode ficar indisponível quando o Debian estiver desligado; o cockpit e chamadas de IA hospedadas não dependem dele.
 
@@ -27,7 +27,7 @@ No bot Andaris já existente:
 - `/cockpit runs` — execuções recentes.
 - `/cockpit run ID_DO_WORKFLOW {"chave":"valor"}` — chama o webhook associado ao ID permitido.
 - `/cockpit ask sua pergunta` — conversa usando o provedor de IA hospedado.
-- `/cockpit visual descrição da imagem` — usa a API de imagem hospedada pelo Andaria e envia a imagem ao mesmo chat do Telegram.
+- `/cockpit visual descrição da imagem` — usa a Images API do OpenRouter hospedada pelo Andaria e envia a imagem ao mesmo chat do Telegram.
 
 O Genio não aceita comandos arbitrários do Debian. O comando `/cockpit run` só aceita IDs incluídos em `N8N_ALLOWED_WORKFLOWS`; use essa allowlist apenas para workflows revisados. A chamada pode produzir efeitos externos conforme a lógica do workflow.
 
@@ -75,7 +75,7 @@ Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Strea
 - O endpoint do Hermes é apenas monitoramento. A ponte de comandos específicos do Hermes continua opcional e depende do Debian/túnel.
 - O serviço Genio e o gate do Kernel estão implantados; o token do Kernel está configurado, mas a lista `KERNEL_ACTION_POLICIES` está vazia. Portanto, **todas as execuções com efeitos colaterais permanecem bloqueadas** até o n8n estar corrigido, os IDs reais serem revisados e as políticas serem cadastradas.
 - O serviço `meu-n8n-gemeo` no Render está configurado como Rust com `cargo build --release` e falha porque o repositório não tem `Cargo.toml`; ele não deve ser usado como n8n ativo.
-- A rota de IA hospedada está configurada e o health check confirmou que a chave OpenRouter existe no Andaria. A rota visual foi adicionada, mas depende de confirmar o deploy e a disponibilidade do token Hugging Face.
+- A rota de IA hospedada está configurada e o health check confirmou que a chave OpenRouter existe no Andaria. A rota visual agora reutiliza essa mesma chave via OpenRouter Images API; o último deploy precisa terminar e a primeira geração deve ser validada no Telegram.
 - A validação ponta a ponta no Telegram ainda exige enviar os comandos de teste ao bot; não foi afirmado sucesso de execução sem evidência.
 - URLs locais como `127.0.0.1` ou `localhost` não são acessíveis pelo Render.
 - Os testes e o deploy devem ser confirmados antes de considerar a solução pronta para produção.
