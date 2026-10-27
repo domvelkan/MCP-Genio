@@ -271,6 +271,8 @@ async def _generate_visual_payload(prompt: str, aspect_ratio: str = "1:1") -> di
         "provider": str(data.get("provider", "hosted")),
         "model": str(data.get("model", "unknown")),
         "cost_usd": data.get("cost_usd"),
+        "image_url": data.get("image_url") if isinstance(data.get("image_url"), str) else None,
+        "url_type": data.get("url_type", "data"),
     }
 
 
@@ -282,7 +284,8 @@ async def visual_generate(prompt: str, aspect_ratio: str = "1:1") -> dict[str, A
     encoded = base64.b64encode(result["image_bytes"]).decode("ascii")
     return {
         "ok": True,
-        "image_url": f"data:{result['media_type']};base64,{encoded}",
+        "image_url": result["image_url"] or f"data:{result['media_type']};base64,{encoded}",
+        "url_type": result["url_type"] if result["image_url"] else "data",
         "media_type": result["media_type"],
         "provider": result["provider"],
         "model": result["model"],
@@ -328,8 +331,8 @@ async def visual_generate_api(request: Request) -> Response:
         encoded = base64.b64encode(result["image_bytes"]).decode("ascii")
         return JSONResponse({
             "ok": True,
-            "image_url": f"data:{result['media_type']};base64,{encoded}",
-            "url_type": "data",
+            "image_url": result["image_url"] or f"data:{result['media_type']};base64,{encoded}",
+            "url_type": result["url_type"] if result["image_url"] else "data",
             "media_type": result["media_type"],
             "provider": result["provider"],
             "model": result["model"],
