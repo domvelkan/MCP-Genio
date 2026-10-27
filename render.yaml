@@ -7,12 +7,16 @@ services:
     envVars:
       - key: GENIO_MCP_TOKEN
         sync: false
+      - key: VISUAL_API_TOKEN
+        sync: false
       - key: KERNEL_GATEWAY_URL
         value: https://andaris-kernel.onrender.com
       - key: KERNEL_GATEWAY_TOKEN
         sync: false
       - key: COCKPIT_BRIDGE_TOKEN
         sync: false
+      - key: ANDARIA_VISUAL_RENDER_URL
+        value: https://andaria.onrender.com/api/cockpit/visual/render
       - key: AI_PROVIDER
         value: openrouter
       - key: OPENROUTER_API_KEY
