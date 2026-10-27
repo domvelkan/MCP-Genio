@@ -278,7 +278,7 @@ async def _generate_visual_payload(prompt: str, aspect_ratio: str = "1:1") -> di
 
 @mcp.tool()
 async def visual_generate(prompt: str, aspect_ratio: str = "1:1") -> dict[str, Any]:
-    """Gera imagem hospedada e retorna uma data URL consumível por clientes autorizados."""
+    """Gera imagem hospedada e retorna URL assinada, quando disponível, ou data URI."""
     import base64
     result = await _generate_visual_payload(prompt, aspect_ratio)
     encoded = base64.b64encode(result["image_bytes"]).decode("ascii")
@@ -290,13 +290,12 @@ async def visual_generate(prompt: str, aspect_ratio: str = "1:1") -> dict[str, A
         "provider": result["provider"],
         "model": result["model"],
         "cost_usd": result["cost_usd"],
-        "url_type": "data",
     }
 
 
 @mcp.custom_route("/api/v1/visual/generate", methods=["POST"], include_in_schema=False)
 async def visual_generate_api(request: Request) -> Response:
-    """API central visual: Authorization Bearer GENIO_MCP_TOKEN; response_format=url|binary."""
+    """API central visual: Authorization Bearer VISUAL_API_TOKEN; response_format=url|binary."""
     try:
         data = await request.json()
     except Exception:
