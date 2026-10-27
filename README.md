@@ -66,6 +66,12 @@ uvicorn server:app --host 0.0.0.0 --port 10000
 
 Endpoints: `/health`, API interna autenticada `/api/cockpit/command` e MCP Streamable HTTP em `/mcp`.
 
+## API visual central (n8n, Apps Script, Colab)
+
+Endpoint: `POST https://mcp-genio.onrender.com/api/v1/visual/generate`. Use `Authorization: Bearer <VISUAL_API_TOKEN>` (token dedicado, diferente do token MCP). `response_format: "binary"` retorna bytes da imagem; `response_format: "url"` retorna uma data URI em `image_url` — não é uma URL pública persistente. Guia de integração, exemplos de Apps Script/n8n/Colab e variáveis: [`docs/visual-api.md`](docs/visual-api.md).
+
+O backend Andaria usa Hugging Face quando `HF_TOKEN` está configurado e `COCKPIT_IMAGE_PROVIDER=auto` (padrão); se não estiver, usa OpenRouter quando configurado. `COCKPIT_HF_IMAGE_MODEL` seleciona o modelo HF.
+
 ## Segurança e limites atuais
 
 - Não comite segredos nem arquivos `.env`.
