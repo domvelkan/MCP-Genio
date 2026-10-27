@@ -32,6 +32,7 @@ COCKPIT_BRIDGE_TOKEN = os.getenv("COCKPIT_BRIDGE_TOKEN", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
 ANDARIA_AI_URL = os.getenv("ANDARIA_AI_URL", "https://andaria.onrender.com/api/cockpit/ai").rstrip("/")
 ANDARIA_VISUAL_URL = os.getenv("ANDARIA_VISUAL_URL", "https://andaria.onrender.com/api/cockpit/visual").rstrip("/")
+ANDARIA_VISUAL_RENDER_URL = os.getenv("ANDARIA_VISUAL_RENDER_URL", "https://andaria.onrender.com/api/cockpit/visual/render").rstrip("/")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
@@ -231,6 +232,107 @@ async def system_status() -> dict[str, Any]:
             logger.info("%s health check failed (%s)", name, type(exc).__name__)
             result[name] = "unreachable"
     return result
+
+
+async def _generate_visual_payload(prompt: str, aspect_ratio: str = "1:1") -> dict[str, Any]:
+    prompt = prompt.strip()
+    if not prompt or len(prompt) > 1800:
+        raise ValueError("prompt deve ter entre 1 e 1800 caracteres")
+    if aspect_ratio not in {"1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"}:
+        raise ValueError("aspect_ratio inválido")
+    if len(COCKPIT_BRIDGE_TOKEN) < 32:
+        raise RuntimeError("Ponte segura Andaria-Genio não configurada")
+    async with httpx.AsyncClient(timeout=110, follow_redirects=False) as client:
+        response = await client.post(
+            ANDARIA_VISUAL_RENDER_URL,
+            headers={"X-Cockpit-Bridge-Token": COCKPIT_BRIDGE_TOKEN, "Content-Type": "application/json"},
+            json={"prompt": prompt, "aspect_ratio": aspect_ratio},
+        )
+        if response.is_error:
+            logger.warning("Visual backend returned HTTP %s", response.status_code)
+            raise RuntimeError("visual_backend_failed")
+        data = response.json()
+    if not isinstance(data, dict) or not data.get("ok") or not isinstance(data.get("image_base64"), str):
+        raise RuntimeError("visual_backend_invalid_response")
+    media_type = data.get("media_type", "image/png")
+    if media_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise RuntimeError("visual_backend_invalid_media_type")
+    try:
+        import base64
+        image_bytes = base64.b64decode(data["image_base64"], validate=True)
+    except (ValueError, TypeError):
+        raise RuntimeError("visual_backend_invalid_image")
+    if not image_bytes or len(image_bytes) > 15 * 1024 * 1024:
+        raise RuntimeError("visual_backend_image_size_out_of_range")
+    return {
+        "image_bytes": image_bytes,
+        "media_type": media_type,
+        "provider": str(data.get("provider", "hosted")),
+        "model": str(data.get("model", "unknown")),
+        "cost_usd": data.get("cost_usd"),
+    }
+
+
+@mcp.tool()
+async def visual_generate(prompt: str, aspect_ratio: str = "1:1") -> dict[str, Any]:
+    """Gera imagem hospedada e retorna uma data URL consumível por clientes autorizados."""
+    import base64
+    result = await _generate_visual_payload(prompt, aspect_ratio)
+    encoded = base64.b64encode(result["image_bytes"]).decode("ascii")
+    return {
+        "ok": True,
+        "image_url": f"data:{result['media_type']};base64,{encoded}",
+        "media_type": result["media_type"],
+        "provider": result["provider"],
+        "model": result["model"],
+        "cost_usd": result["cost_usd"],
+        "url_type": "data",
+    }
+
+
+@mcp.custom_route("/api/v1/visual/generate", methods=["POST"], include_in_schema=False)
+async def visual_generate_api(request: Request) -> Response:
+    """API central visual: Authorization Bearer GENIO_MCP_TOKEN; response_format=url|binary."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    prompt = str(data.get("prompt", "")).strip()
+    aspect_ratio = str(data.get("aspect_ratio", "1:1")).strip()
+    response_format = str(data.get("response_format", "url")).strip().lower()
+    if response_format not in {"url", "binary"}:
+        return JSONResponse({"error": "response_format_must_be_url_or_binary"}, status_code=400)
+    try:
+        result = await _generate_visual_payload(prompt, aspect_ratio)
+        if response_format == "binary":
+            extension = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[result["media_type"]]
+            return Response(
+                content=result["image_bytes"],
+                media_type=result["media_type"],
+                headers={
+                    "Content-Disposition": f'inline; filename="andaris-visual.{extension}"',
+                    "X-Image-Provider": result["provider"],
+                    "X-Image-Model": result["model"][:200],
+                },
+            )
+        import base64
+        encoded = base64.b64encode(result["image_bytes"]).decode("ascii")
+        return JSONResponse({
+            "ok": True,
+            "image_url": f"data:{result['media_type']};base64,{encoded}",
+            "url_type": "data",
+            "media_type": result["media_type"],
+            "provider": result["provider"],
+            "model": result["model"],
+            "cost_usd": result["cost_usd"],
+        })
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        logger.warning("Visual API failed (%s)", type(exc).__name__)
+        return JSONResponse({"error": "visual_generation_failed"}, status_code=502)
 
 
 @mcp.tool()
@@ -483,6 +585,7 @@ async def cockpit_health(_: Request) -> Response:
         "kernel_gate_configured": bool(KERNEL_GATEWAY_URL and len(KERNEL_GATEWAY_TOKEN) >= 32),
         "ai_routes": configured_providers(),
         "hosted_visual_configured": bool(ANDARIA_VISUAL_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
+        "central_visual_api_configured": bool(ANDARIA_VISUAL_RENDER_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
         "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
         "comfyui_configured": bool(COMFYUI_URL),
