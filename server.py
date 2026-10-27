@@ -17,6 +17,7 @@ logger = logging.getLogger("genio-mcp")
 
 APP_NAME = "MCP-Genio"
 API_TOKEN = os.getenv("GENIO_MCP_TOKEN", "").strip()
+VISUAL_API_TOKEN = os.getenv("VISUAL_API_TOKEN", "").strip()
 COMFYUI_URL = os.getenv("COMFYUI_URL", "").rstrip("/")
 N8N_URL = os.getenv("N8N_URL", "").rstrip("/")
 N8N_API_KEY = os.getenv("N8N_API_KEY", "").strip()
@@ -302,6 +303,12 @@ async def visual_generate_api(request: Request) -> Response:
     prompt = str(data.get("prompt", "")).strip()
     aspect_ratio = str(data.get("aspect_ratio", "1:1")).strip()
     response_format = str(data.get("response_format", "url")).strip().lower()
+    if len(VISUAL_API_TOKEN) < 32:
+        return JSONResponse({"error": "visual_api_token_not_configured"}, status_code=503)
+    supplied = request.headers.get("authorization", "")
+    expected = f"Bearer {VISUAL_API_TOKEN}"
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return JSONResponse({"error": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
     if response_format not in {"url", "binary"}:
         return JSONResponse({"error": "response_format_must_be_url_or_binary"}, status_code=400)
     try:
@@ -560,7 +567,7 @@ async def cockpit_command(request: Request) -> Response:
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in {"/health", "/api/cockpit/health", "/api/cockpit/command"}:
+        if request.url.path in {"/health", "/api/cockpit/health", "/api/cockpit/command", "/api/v1/visual/generate"}:
             return await call_next(request)
         if len(API_TOKEN) < 32:
             return JSONResponse({"error": "server_auth_not_configured"}, status_code=503)
@@ -586,6 +593,7 @@ async def cockpit_health(_: Request) -> Response:
         "ai_routes": configured_providers(),
         "hosted_visual_configured": bool(ANDARIA_VISUAL_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
         "central_visual_api_configured": bool(ANDARIA_VISUAL_RENDER_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
+        "visual_api_token_configured": len(VISUAL_API_TOKEN) >= 32,
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
         "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
         "comfyui_configured": bool(COMFYUI_URL),
