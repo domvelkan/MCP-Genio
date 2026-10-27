@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import os
+import uuid
 from typing import Any
 
 import httpx
@@ -34,6 +35,7 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
 ANDARIA_AI_URL = os.getenv("ANDARIA_AI_URL", "https://andaria.onrender.com/api/cockpit/ai").rstrip("/")
 ANDARIA_VISUAL_URL = os.getenv("ANDARIA_VISUAL_URL", "https://andaria.onrender.com/api/cockpit/visual").rstrip("/")
 ANDARIA_VISUAL_RENDER_URL = os.getenv("ANDARIA_VISUAL_RENDER_URL", "https://andaria.onrender.com/api/cockpit/visual/render").rstrip("/")
+ANDARIA_AGENT_TASK_URL = os.getenv("ANDARIA_AGENT_TASK_URL", "https://andaria.onrender.com/api/cockpit/agent/task").rstrip("/")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
@@ -439,6 +441,100 @@ async def n8n_trigger_allowed_workflow(workflow_id: str, payload: dict[str, Any]
     return result if isinstance(result, dict) else {"result": result}
 
 
+
+async def _agent_store(action: str, chat_id: str, **fields: Any) -> dict[str, Any]:
+    if len(COCKPIT_BRIDGE_TOKEN) < 32:
+        raise RuntimeError("agent_store_bridge_not_configured")
+    body = {"action": action, "chat_id": str(chat_id), **fields}
+    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+        response = await client.post(
+            ANDARIA_AGENT_TASK_URL,
+            headers={"X-Cockpit-Bridge-Token": COCKPIT_BRIDGE_TOKEN, "Content-Type": "application/json"},
+            json=body,
+        )
+    if response.is_error:
+        logger.warning("Agent task store returned HTTP %s", response.status_code)
+        raise RuntimeError("agent_task_store_unavailable")
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("agent_task_store_invalid_response")
+    return data
+
+
+def _validate_agent_package(raw: str) -> dict[str, str]:
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_json") from exc
+    required_keys = {"raioX", "hook", "copy", "promptVideo"}
+    if not isinstance(data, dict) or set(data.keys()) != required_keys:
+        raise ValueError("invalid_schema")
+    limits = {"raioX": 1200, "hook": 500, "copy": 5000, "promptVideo": 3000}
+    for key, max_length in limits.items():
+        value = data.get(key)
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > max_length:
+            raise ValueError("invalid_field_" + key)
+        data[key] = value.strip()
+    return data
+
+
+async def _run_tiny_agent(chat_id: str, objective: str) -> str:
+    if not objective or len(objective) > 5000:
+        raise ValueError("Informe um objetivo de 1 a 5.000 caracteres.")
+    key = str(uuid.uuid4())
+    created = await _agent_store("create", chat_id, objective=objective, idempotency_key=key)
+    task = created.get("task") or {}
+    task_id = str(task.get("id", "")).strip()
+    if not task_id:
+        raise RuntimeError("agent_task_create_not_confirmed")
+    await _agent_store("update", chat_id, task_id=task_id, status="processing")
+    system_prompt = (
+        "Você é o Prompt Executor do Canal Dark. Gere somente um objeto JSON válido, sem Markdown, "
+        "com exatamente quatro chaves string: raioX (diagnóstico comercial em 2 frases, sem inventar fatos), "
+        "hook (gancho para os primeiros 3 segundos), copy (roteiro curto de fala/legenda) e "
+        "promptVideo (prompt visual detalhado em inglês). Se os dados forem insuficientes, deixe explícitas "
+        "as incertezas em raioX. Não alegue ter pesquisado ou executado ações externas."
+    )
+    prompt = "Produza o pacote de conteúdo para este objetivo/dados brutos:\n" + objective
+    package = None
+    last_error = "invalid_json_or_schema"
+    for attempt in range(2):
+        result = await chat_with_provider(prompt, system_prompt=system_prompt)
+        try:
+            package = _validate_agent_package(result["text"])
+            break
+        except ValueError as exc:
+            last_error = str(exc)
+            prompt = (
+                "A resposta anterior falhou na validação (" + last_error + "). Refaça do zero. "
+                "Responda APENAS com JSON válido contendo exatamente raioX, hook, copy e promptVideo, todos strings. "
+                "Dados originais:\n" + objective + "\nResposta rejeitada:\n" + result.get("text", "")[:6000]
+            )
+    if package is None:
+        await _agent_store("update", chat_id, task_id=task_id, status="blocked", error={"code": "output_validation_failed"})
+        return f"⛔ Tarefa {task_id} bloqueada: a saída da IA não passou na validação JSON. Você pode tentar novamente com /cockpit agent start ..."
+    await _agent_store("update", chat_id, task_id=task_id, status="completed", result=package)
+    return (
+        f"✅ Tarefa Tiny concluída · ID {task_id}\n\n"
+        f"RAIO-X\n{package['raioX']}\n\nHOOK\n{package['hook']}\n\n"
+        f"COPY\n{package['copy']}\n\nPROMPT VIDEO\n{package['promptVideo']}"
+    )
+
+
+def _format_agent_task(task: dict[str, Any]) -> str:
+    task_id = str(task.get("id", "sem-id"))
+    status = str(task.get("status", "desconhecido"))
+    title = str(task.get("title", "Tarefa"))[:180]
+    lines = [f"ID: {task_id}", f"Status: {status}", f"Objetivo: {title}"]
+    result = task.get("result")
+    if isinstance(result, dict):
+        lines.extend(["", "Resultado:", json.dumps(result, ensure_ascii=False)[:2500]])
+    error = task.get("error")
+    if isinstance(error, dict):
+        lines.extend(["", "Erro registrado: " + str(error.get("code", "erro"))[:120]])
+    return "\n".join(lines)
+
+
 def _cockpit_help() -> str:
     return (
         "🚀 ANDARIS · COCKPIT\n\n"
@@ -467,6 +563,27 @@ async def process_cockpit_command(chat_id: str, text: str) -> str:
 
     if subcommand in {"help", "ajuda"}:
         return _cockpit_help()
+    if subcommand in {"agent", "agente"}:
+        action, _, agent_args = args.strip().partition(" ")
+        action = action.lower()
+        if action in {"start", "iniciar", "run", "executar"}:
+            objective = agent_args.strip()
+            if not objective:
+                return "Uso: /cockpit agent start descreva o produto ou objetivo"
+            try:
+                return (await _run_tiny_agent(chat_id, objective))[:3700]
+            except Exception as exc:
+                logger.warning("Tiny agent failed (%s)", type(exc).__name__)
+                return "⛔ Não foi possível concluir a tarefa Tiny. O estado foi preservado quando possível; consulte /cockpit agent status."
+        if action in {"status", "list", "listar", "estado"}:
+            task_id = agent_args.strip()
+            if task_id:
+                data = await _agent_store("get", chat_id, task_id=task_id)
+                return _format_agent_task(data.get("task") or {})
+            data = await _agent_store("list", chat_id)
+            tasks = data.get("tasks") or []
+            return "Tarefas Tiny recentes:\n" + ("\n\n".join(_format_agent_task(item) for item in tasks) if tasks else "Nenhuma tarefa encontrada.")
+        return "Uso: /cockpit agent start OBJETIVO | /cockpit agent status [ID]"
     if subcommand in {"status", "cockpit"}:
         status = await system_status()
         lines = ["🚀 ANDARIS · COCKPIT", ""]
@@ -596,6 +713,7 @@ async def cockpit_health(_: Request) -> Response:
         "hosted_visual_configured": bool(ANDARIA_VISUAL_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
         "central_visual_api_configured": bool(ANDARIA_VISUAL_RENDER_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
         "visual_api_token_configured": len(VISUAL_API_TOKEN) >= 32,
+        "tiny_agent_store_configured": bool(ANDARIA_AGENT_TASK_URL and len(COCKPIT_BRIDGE_TOKEN) >= 32),
         "n8n_configured": bool(N8N_URL and N8N_API_KEY),
         "allowed_workflow_count": len(N8N_ALLOWED_WORKFLOWS),
         "comfyui_configured": bool(COMFYUI_URL),
