@@ -13,6 +13,7 @@ The central endpoint is served by MCP-Genio and delegates image generation to th
 - `HF_TOKEN`: optional Hugging Face token with inference access.
 - `COCKPIT_IMAGE_PROVIDER`: `auto` (default), `huggingface`, or `openrouter`.
 - `COCKPIT_HF_IMAGE_MODEL`: defaults to `black-forest-labs/FLUX.1-dev`.
+- `COCKPIT_VISUAL_STORAGE_BUCKET`: optional private Supabase Storage bucket name. When configured and Supabase credentials exist, the API uploads the generated image and returns a signed URL valid for one hour. Create the bucket first; if storage is not configured or upload fails, the API falls back to a data URI.
 - Existing `OPENROUTER_API_KEY` remains the fallback provider key.
 - `COCKPIT_IMAGE_MODEL`: OpenRouter image model, defaults to `bytedance-seed/seedream-4.5`.
 
@@ -39,7 +40,7 @@ Supported aspect ratios: `1:1`, `3:2`, `2:3`, `4:3`, `3:4`, `16:9`, `9:16`. Prom
 
 ### URL/data-URI response
 
-With `response_format=url`, the JSON includes `image_url` as a `data:image/...;base64,...` URI. This is a self-contained data URI, **not a public, persistent internet URL**. Use it when a client accepts data URIs or needs to decode the image itself.
+With `response_format=url`, the JSON includes `image_url`. If `COCKPIT_VISUAL_STORAGE_BUCKET` is configured and the upload succeeds, this is a signed HTTPS URL valid for one hour. Otherwise it is a self-contained `data:image/...;base64,...` URI, **not a public, persistent internet URL**. Use the signed URL for normal HTTP clients; use binary mode when the client needs the bytes directly.
 
 ### Binary response
 
@@ -131,7 +132,7 @@ with open("andaris-visual.png", "wb") as output:
 
 ## Current limits
 
-- The data-URI mode is not a shareable public URL. A public URL requires an object-storage destination and expiry/access policy.
+- Without `COCKPIT_VISUAL_STORAGE_BUCKET`, URL mode falls back to a data URI, which is not a shareable public URL. Signed URLs expire after one hour.
 - Generation is synchronous. Hugging Face cold starts or model/provider load can take time; clients should use generous timeouts.
 - Render's free services can sleep, causing cold starts.
 - The ComfyUI workflow API is separate and remains dependent on a reachable `COMFYUI_URL`.
