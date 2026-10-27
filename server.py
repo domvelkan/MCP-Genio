@@ -498,18 +498,26 @@ async def _run_tiny_agent(chat_id: str, objective: str) -> str:
     prompt = "Produza o pacote de conteúdo para este objetivo/dados brutos:\n" + objective
     package = None
     last_error = "invalid_json_or_schema"
-    for attempt in range(2):
-        result = await chat_with_provider(prompt, system_prompt=system_prompt)
+    try:
+        for attempt in range(2):
+            result = await chat_with_provider(prompt, system_prompt=system_prompt)
+            try:
+                package = _validate_agent_package(result["text"])
+                break
+            except ValueError as exc:
+                last_error = str(exc)
+                prompt = (
+                    "A resposta anterior falhou na validação (" + last_error + "). Refaça do zero. "
+                    "Responda APENAS com JSON válido contendo exatamente raioX, hook, copy e promptVideo, todos strings. "
+                    "Dados originais:\\n" + objective + "\\nResposta rejeitada:\\n" + result.get("text", "")[:6000]
+                )
+    except Exception as exc:
+        logger.warning("Tiny agent provider failed (%s)", type(exc).__name__)
         try:
-            package = _validate_agent_package(result["text"])
-            break
-        except ValueError as exc:
-            last_error = str(exc)
-            prompt = (
-                "A resposta anterior falhou na validação (" + last_error + "). Refaça do zero. "
-                "Responda APENAS com JSON válido contendo exatamente raioX, hook, copy e promptVideo, todos strings. "
-                "Dados originais:\n" + objective + "\nResposta rejeitada:\n" + result.get("text", "")[:6000]
-            )
+            await _agent_store("update", chat_id, task_id=task_id, status="blocked", error={"code": "provider_unavailable"})
+        except Exception:
+            logger.warning("Tiny agent could not persist provider failure")
+        return f"⛔ Tarefa {task_id} bloqueada: provedor de IA indisponível. Consulte /cockpit agent status."
     if package is None:
         await _agent_store("update", chat_id, task_id=task_id, status="blocked", error={"code": "output_validation_failed"})
         return f"⛔ Tarefa {task_id} bloqueada: a saída da IA não passou na validação JSON. Você pode tentar novamente com /cockpit agent start ..."
@@ -544,7 +552,9 @@ def _cockpit_help() -> str:
         "/cockpit runs — execuções recentes\n"
         "/cockpit run ID [JSON] — executar workflow autorizado\n"
         "/cockpit ask pergunta — conversar com a IA\n"
-        "/cockpit visual descrição — gerar imagem pela API hospedada e enviar aqui\n\n"
+        "/cockpit visual descrição — gerar imagem pela API hospedada e enviar aqui\n"
+        "/cockpit agent start objetivo — executar tarefa Tiny com estado persistente\n"
+        "/cockpit agent status [ID] — consultar tarefas Tiny\n\n"
         "Comandos de execução só aceitam workflows previamente autorizados."
     )
 
