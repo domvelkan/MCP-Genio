@@ -509,7 +509,7 @@ async def _run_tiny_agent(chat_id: str, objective: str) -> str:
                 prompt = (
                     "A resposta anterior falhou na validação (" + last_error + "). Refaça do zero. "
                     "Responda APENAS com JSON válido contendo exatamente raioX, hook, copy e promptVideo, todos strings. "
-                    "Dados originais:\\n" + objective + "\\nResposta rejeitada:\\n" + result.get("text", "")[:6000]
+                    "Dados originais:\n" + objective + "\nResposta rejeitada:\n" + result.get("text", "")[:6000]
                 )
     except Exception as exc:
         logger.warning("Tiny agent provider failed (%s)", type(exc).__name__)
