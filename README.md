@@ -31,6 +31,20 @@ No bot Andaris já existente:
 
 O Genio não aceita comandos arbitrários do Debian. O comando `/cockpit run` só aceita IDs incluídos em `N8N_ALLOWED_WORKFLOWS`; use essa allowlist apenas para workflows revisados. A chamada pode produzir efeitos externos conforme a lógica do workflow.
 
+## Agente Tiny (Telegram + Supabase)
+
+O primeiro incremento do agente reutiliza a tabela existente `public.agent_tasks` no Supabase do Andaria e o webhook Telegram já registrado pelo serviço Andaria. Nenhuma segunda instância de webhook é criada e o repositório `andaris-mcp-gateway` não é alterado.
+
+Comandos disponíveis no chat administrativo:
+
+- `/cockpit agent start <objetivo>` — cria uma tarefa persistente, gera o pacote de conteúdo, valida JSON e salva o resultado.
+- `/cockpit agent status` — lista as cinco tarefas Tiny mais recentes desse chat.
+- `/cockpit agent status <UUID>` — consulta uma tarefa específica.
+
+O executor Tiny só produz texto estruturado (`raioX`, `hook`, `copy`, `promptVideo`). Ele não publica, não compra, não envia mensagens a terceiros e não executa código arbitrário. Saídas inválidas recebem uma tentativa de correção; falhas são registradas como `blocked`. A API interna do Andaria protege operações na tabela por `X-Cockpit-Bridge-Token`; a tabela mantém RLS ativado e o backend usa as credenciais privadas já existentes.
+
+Este é o primeiro incremento funcional, não a versão completa: ainda não cria arquivos no Google Drive nem faz pesquisa web autônoma. Essas capacidades entram depois de validar o fluxo Telegram → tarefa persistida → resultado validado.
+
 ## Configuração
 
 Gere um token aleatório com:
